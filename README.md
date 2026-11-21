@@ -1,7 +1,5 @@
 # Tether
 
-> Not affiliated with Anthropic. "Claude" and "Claude Code" are trademarks of Anthropic.
-
 A self-hosted phone app for **Claude Code running on your own computer**.
 
 You open it on your phone, type or speak, and the Claude Code on your computer does the work in your real project folders. Your phone talks to your computer directly over your own [Tailscale](https://tailscale.com) network. Chats are stored on your computer.
