@@ -34,6 +34,7 @@ On a tablet or desktop the chat list stays open on the left:
 
 **Claude Code**
 - **Chat with Claude Code from your phone.** It runs the real Claude Code on your computer, with your own login, in the project folder you choose.
+- **Tap paths and links in replies.** Any file or folder path Claude mentions (`src/app.js`, `~/Downloads/report.pdf`, `docs/`) opens in the app's viewer; web links open in your phone's browser.
 - **Approve or deny from the phone.** When Claude wants to run a command or edit a file, a card appears with Allow and Deny.
 - **Continue a chat that is open on the computer (optional).** If Claude Code runs in a tmux session, the phone and the computer show the same conversation.
 - **Voice notes (optional).** Speak instead of typing. The speech is turned into text on your own computer.

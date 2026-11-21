@@ -742,3 +742,7 @@ audio.v-media { background: transparent; width: calc(100% - 32px); }
 .git-diff .d-meta { color: var(--faint); } .git-diff .d-hunk { color: var(--h3); }
 [data-look="terminal"] .git-btn, [data-look="terminal"] .git-msg { border-radius: var(--r); }
 #pushRow .sw-note { padding: 6px 2px 0; } #pushRow .drawer-link { display: block; width: 100%; margin: 6px 0 0; border-top: 0; padding: 10px 2px; color: var(--link); }
+
+/* Tappable paths in replies (plain text as well as code) */
+span.file-link { color: var(--link); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; font-family: var(--mono); font-size: .92em; }
+span.file-link:active, code.file-link:active { opacity: .6; }

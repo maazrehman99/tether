@@ -425,12 +425,47 @@
     const wait = Math.max(0, 50 - (performance.now() - lastPaint));
     return setTimeout(() => requestAnimationFrame(() => { lastPaint = performance.now(); fn(); }), wait) || 1;
   }
-  const PATHLIKE = /^(~\/|\/home\/|\.{0,2}\/)?[\w@.+-]+(\/[\w@.+-]+)*\.(md|mdx|txt|py|js|mjs|ts|tsx|json|ya?ml|toml|sh|css|html|csv|ini|cfg|sql|ipynb|png|jpe?g|webp|gif|svg)$/i;
+  // ---------- tappable file paths and links in replies ----------
+  // A path counts if it has a known file type, or clearly looks like a path (starts with ~/ / ./ ../ or
+  // has a folder part and ends with /). ":12" or ":12:5" after it (a line number) is allowed and ignored.
+  const EXT = 'md|mdx|markdown|txt|log|py|ipynb|js|mjs|cjs|jsx|ts|tsx|json|jsonl|ya?ml|toml|ini|cfg|conf|env\\.example|sh|bash|zsh|css|scss|html?|xml|svg|csv|tsv|sql|rs|go|java|kt|c|cc|cpp|h|hpp|rb|php|swift|vue|svelte|lock|pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|png|jpe?g|webp|gif|mp4|m4v|mov|webm|mp3|m4a|wav|ogg|flac';
+  const SEG = '[\\w@.+-]+';
+  const PATH_RE = new RegExp(`^(?:~\\/|\\/|\\.{1,2}\\/)?(?:${SEG}\\/)*${SEG}\\.(?:${EXT})$|^(?:~\\/|\\/|\\.{1,2}\\/)(?:${SEG}\\/)*${SEG}\\/?$|^(?:${SEG}\\/)+$`, 'i');
+  const LINE_RE = /:(\d+)(?::\d+)?$/;
+  // Names of tools that look like file names in normal sentences ("built with node.js").
+  const TECH_NAME = /^(node|next|nuxt|vue|three|d3|chart|express|react|angular|ember|backbone|p5|anime|moment|day|socket|alpine|solid|deno|bun)\.js$/i;
+  function asPath(t) {
+    t = String(t).trim().replace(/^["'`(<]+|[)"'`>,;.]+$/g, '');
+    if (!t || t.length > 300 || /^[a-z]+:\/\//i.test(t) || /\s/.test(t)) return null;
+    const bare = t.replace(LINE_RE, '');
+    if (bare === '/' || bare === '~' || bare === '.' || bare === '..') return null;
+    if (/^\/(?:\w+)$/.test(bare) && !/\./.test(bare)) return null;   // "/help", "/remote-control": commands, not paths
+    return PATH_RE.test(bare) ? bare : null;
+  }
+  // Paths inside plain text: anything path-shaped between spaces or punctuation.
+  const TEXT_PATH_RE = new RegExp(`(^|[\\s(\\[{"'])((?:~\\/|\\/|\\.{1,2}\\/)?(?:${SEG}\\/)+${SEG}(?:\\.(?:${EXT}))?(?::\\d+(?::\\d+)?)?\\/?|(?:~\\/|\\.{1,2}\\/)?(?:${SEG}\\/)+|${SEG}\\.(?:${EXT})(?::\\d+)?)(?=$|[\\s)\\]},;:!?"']|\\.(?:\\s|$))`, 'gi');
   function linkFiles(node) {
     for (const c of node.querySelectorAll('code')) {
       if (c.closest('pre')) continue;
-      const t = c.textContent.trim();
-      if (PATHLIKE.test(t)) { c.classList.add('file-link'); c.dataset.file = t; }
+      const p = asPath(c.textContent);
+      if (p) { c.classList.add('file-link'); c.dataset.file = p; }
+    }
+    // Plain text: walk the text, skip code, links and pre blocks.
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, { acceptNode: (t) => (t.parentElement.closest('code,pre,a,.file-link') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    const todo = []; for (let t = walker.nextNode(); t; t = walker.nextNode()) if (/[\/.]/.test(t.data)) todo.push(t);
+    for (const t of todo) {
+      const text = t.data; let last = 0, m, out = null;
+      TEXT_PATH_RE.lastIndex = 0;
+      while ((m = TEXT_PATH_RE.exec(text))) {
+        const raw = m[2].replace(/[.,;:!?]+$/, ''), p = asPath(raw);   // a full stop after a path is not part of it
+        if (!p || (!/\//.test(raw) && (!new RegExp(`\\.(?:${EXT})(?::\\d+)?$`, 'i').test(raw) || TECH_NAME.test(raw)))) continue;
+        out = out || document.createDocumentFragment();
+        const start = m.index + m[1].length;
+        out.append(text.slice(last, start));
+        const sp = document.createElement('span'); sp.className = 'file-link'; sp.dataset.file = p; sp.textContent = raw;
+        out.append(sp); last = start + raw.length;
+      }
+      if (out) { out.append(text.slice(last)); t.replaceWith(out); }
     }
   }
   function renderText(key) {
@@ -688,8 +723,11 @@
   input.addEventListener('blur', () => setTimeout(fit, 60));
 
   msgs.addEventListener('click', (e) => {
-    const f = e.target.closest('code.file-link');
+    const f = e.target.closest('.file-link');
     if (f) { buzz(4); openFile(f.dataset.file); return; }
+    // Web links always open in the phone's browser (not inside the app).
+    const a = e.target.closest('a[href]');
+    if (a && /^https?:\/\//i.test(a.getAttribute('href'))) { e.preventDefault(); buzz(4); window.open(a.href, '_blank', 'noopener,noreferrer'); return; }
     const c = e.target.closest('[data-copy]');
     if (!c) return;
     copyWith(c, c.closest('.code').querySelector('code').textContent);
@@ -1067,6 +1105,13 @@
     prev.kind === 'git' ? openGit() : prev.kind === 'gitdiff' ? openGitDiff(prev.file) : prev.kind === 'term' ? openTerm() : prev.kind === 'places' ? openPlaces() : prev.kind === 'sys' ? openSys() : prev.kind === 'dir' ? openDir(prev.path, prev.project, true) : openFile(prev.path, prev.project, true);
   }
   $('vBack').onclick = vBackTap;
+  // Inside the viewer too (Markdown files): paths open in the viewer, web links in the browser.
+  vBody.addEventListener('click', (e) => {
+    const f = e.target.closest('.file-link');
+    if (f && !e.target.closest('.cm-editor')) { buzz(4); openFile(f.dataset.file, (vStack[vStack.length - 1] || {}).project || curProject()); return; }
+    const a = e.target.closest('a[href]');
+    if (a && /^https?:\/\//i.test(a.getAttribute('href'))) { e.preventDefault(); buzz(4); window.open(a.href, '_blank', 'noopener,noreferrer'); }
+  });
   // ---------- back gesture (set 2026-11-14) ----------
   // A "guard" history entry sits on top of the app, so Android's back swipe comes to us
   // first: it closes the top layer (file viewer, bottom sheet, drawer) one at a time.
