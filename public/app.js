@@ -165,6 +165,7 @@
         if (S.lockOn && S.rememberDays && S.sid) store.set('sid', S.sid); else store.del('sid');
         $('termBtn').hidden = !m.terminal;
         showAwake(m.awake);
+        sendVis(); showPush();
         S.dirs = m.dirs || {};
         hideLock(); showLockRow();
         hideSetup();
@@ -272,7 +273,7 @@
       }
       case 'terminal': renderTerminal(m.sessions); break;
       case 'run-out': case 'run-end': termMsg(m); break;
-      case 'file': case 'sys': case 'media': case 'lock-begin': case 'lock-state': case 'lock-reauth': case 'awake': { const h = fileWaits.get(m.rid); if (h) { fileWaits.delete(m.rid); h(m); } break; }
+      case 'file': case 'sys': case 'media': case 'save': case 'git': case 'push-key': case 'lock-begin': case 'lock-state': case 'lock-reauth': case 'awake': { const h = fileWaits.get(m.rid); if (h) { fileWaits.delete(m.rid); h(m); } break; }
       case 'error': toastLine('Error: ' + m.msg); break;
     }
   }
@@ -1013,13 +1014,17 @@
   // ---------- notifications (only while the app is in the background) ----------
   function notify(title, body) {
     document.title = '• ' + APP;
+    // With push on, the computer sends these itself (and they arrive even if the app is closed).
+    if (store.get('pushOn', false)) return;
     if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;
     navigator.serviceWorker?.ready.then((r) => r.showNotification(title, { body: String(body).slice(0, 120), tag: 'claude', renotify: true, icon: '/icon-192.png', badge: '/icon-192.png' })).catch(() => {});
   }
 
 
   // ---------- file viewer ----------
-  const viewer = $('viewer'), vBody = $('vBody'), vTitle = $('vTitle'), vSub = $('vSub'), vAct = $('vAct');
+  const viewer = $('viewer'), vBody = $('vBody'), vTitle = $('vTitle'), vSub = $('vSub'), vAct = $('vAct'), vEdit = $('vEdit');
+  let curFile = null;   // { project, path, r } of the text file on screen, for Edit
+  let ed = null;        // the open editor: { view, project, path, r, dirty }
   const fileWaits = new Map();
   let vStack = [];          // screens inside the viewer, for the back button
   let vOpen = false;
@@ -1043,6 +1048,7 @@
   function hideViewer(fromPop) {
     if (!vOpen) return;
     vOpen = false; vStack = [];
+    closeEditor(); vEdit.hidden = true; curFile = null;
     clearInterval(sysTimer); sysTimer = 0;
     vBody.onscroll = null; closePdf();
     if (term && term.running) { wsSend({ op: 'run-stop' }); term.cur.end = 'Stopped (screen closed)'; term.cur.bad = true; termSave(); }
@@ -1052,11 +1058,13 @@
     if (!fromPop && history.state && history.state.v) { S.skipPop = true; history.back(); }
   }
   function vBackTap() {
+    if (ed && ed.dirty) return askLeave(() => vBackTap());
+    if (ed) { closeEditor(); const f = curFile; if (f) { renderFile(f.r, false); appendDl(f); } return; }
     buzz(4);
     vStack.pop();
     const prev = vStack.pop();
     if (!prev) return hideViewer();
-    prev.kind === 'term' ? openTerm() : prev.kind === 'places' ? openPlaces() : prev.kind === 'sys' ? openSys() : prev.kind === 'dir' ? openDir(prev.path, prev.project, true) : openFile(prev.path, prev.project, true);
+    prev.kind === 'git' ? openGit() : prev.kind === 'gitdiff' ? openGitDiff(prev.file) : prev.kind === 'term' ? openTerm() : prev.kind === 'places' ? openPlaces() : prev.kind === 'sys' ? openSys() : prev.kind === 'dir' ? openDir(prev.path, prev.project, true) : openFile(prev.path, prev.project, true);
   }
   $('vBack').onclick = vBackTap;
   // ---------- back gesture (set 2026-11-14) ----------
@@ -1074,6 +1082,8 @@
   }
   addEventListener('popstate', () => {
     if (S.skipPop) { S.skipPop = false; return; }
+    // Unsaved edits: stay, and ask first.
+    if (vOpen && ed && ed.dirty) { history.pushState({ v: 1 }, ''); askLeave(() => vBackTap()); return; }
     if (vOpen) {
       if (vStack.length > 1) { history.pushState({ v: 1 }, ''); vBackTap(); } else hideViewer(true);
       return;
@@ -1096,6 +1106,7 @@
   async function openFile(p, project = curProject(), isBack) {
     showViewer();
     vStack.push({ kind: 'file', path: p, project });
+    closeEditor(); vEdit.hidden = true; curFile = null;
     vTitle.textContent = base(p);
     vSub.textContent = p;
     vAct.hidden = true;
@@ -1114,6 +1125,7 @@
     }
     if (r.text != null && r.text.length < 300000) store.set(key, r);
     if (r.kind) { openMedia(r, project, p, dl); return; }
+    curFile = { project, path: p, r };
     renderFile(r, false);
     dl();
   }
@@ -1126,6 +1138,9 @@
     if (r.truncated) vBody.append(el('div', 'v-note', 'Large file: showing the first 600 KB.'));
     if (r.image) { const img = el('img', 'v-img'); img.src = r.image; vBody.append(img); return; }
     const text = r.text || '';
+    // Text files (not cut short, not from the offline copy) can be edited.
+    vEdit.hidden = !(curFile && curFile.r === r && !isCached && !r.truncated && r.text != null);
+    vEdit.onclick = () => { buzz(6); openEditor(); };
     const isMd = /\.(md|mdx|markdown)$/i.test(r.path || '');
     const sep = /\.csv$/i.test(r.path || '') ? ',' : /\.tsv$/i.test(r.path || '') ? '\t' : null;
     if (sep && text) { renderTable(text, sep); vAct.hidden = false; vAct.textContent = 'Copy'; delete vAct.dataset.was; vAct.onclick = () => copyWith(vAct, text); return; }
@@ -1232,6 +1247,195 @@
     };
     dl();
   }
+
+  // ---------- code editor (CodeMirror, loaded only when you tap Edit) ----------
+  let cm = null;
+  function appendDl(f) { const b = el('button', 'v-dl', ios ? 'Save or share' : 'Download to phone'); b.onclick = () => downloadFile(f.project, f.path); vBody.append(b); }
+  function closeEditor() { if (ed) { try { ed.view.destroy(); } catch {} ed = null; } viewer.classList.remove('editing'); vAct.disabled = false; }
+  function edState() {
+    if (!ed) return;
+    vSub.textContent = ed.dirty ? 'Edited · not saved' : (ed.r.path || '') + ' · saved';
+    vAct.disabled = !ed.dirty;
+  }
+  function edTheme() {
+    return cm.EditorView.theme({
+      '&': { color: 'var(--text)', backgroundColor: 'var(--bg)', fontSize: '13.5px', height: '100%' },
+      '.cm-content': { fontFamily: 'var(--mono)', caretColor: 'var(--accent)', padding: '10px 0' },
+      '.cm-scroller': { fontFamily: 'var(--mono)', lineHeight: '1.6' },
+      '.cm-gutters': { backgroundColor: 'var(--surface)', color: 'var(--faint)', border: 'none', borderRight: '1px solid var(--line)' },
+      '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--raised) 55%, transparent)' },
+      '.cm-activeLineGutter': { backgroundColor: 'var(--raised)', color: 'var(--soft)' },
+      '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
+      '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'var(--sel) !important' },
+      '.cm-panels': { backgroundColor: 'var(--surface)', color: 'var(--text)', borderTop: '1px solid var(--line)' },
+      '.cm-panels input, .cm-panels button': { fontSize: '15px' },
+      '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--warn) 30%, transparent)' },
+      '.cm-matchingBracket': { backgroundColor: 'var(--raised2)', outline: '1px solid var(--outline)' },
+    });
+  }
+  function edHighlight() {
+    const t = cm.tags;
+    return cm.syntaxHighlighting(cm.HighlightStyle.define([
+      { tag: [t.keyword, t.controlKeyword, t.operatorKeyword, t.modifier], color: 'var(--kw)' },
+      { tag: [t.string, t.special(t.string), t.regexp], color: 'var(--str)' },
+      { tag: [t.number, t.bool, t.null, t.atom], color: 'var(--num)' },
+      { tag: [t.comment, t.lineComment, t.blockComment], color: 'var(--com)', fontStyle: 'italic' },
+      { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'var(--fn)' },
+      { tag: [t.typeName, t.className, t.namespace], color: 'var(--h3)' },
+      { tag: [t.heading], color: 'var(--h)', fontWeight: '700' },
+      { tag: [t.link, t.url], color: 'var(--link)', textDecoration: 'underline' },
+      { tag: [t.tagName], color: 'var(--kw)' }, { tag: [t.attributeName, t.propertyName], color: 'var(--fn)' },
+      { tag: [t.emphasis], fontStyle: 'italic' }, { tag: [t.strong], fontWeight: '700' },
+    ]));
+  }
+  async function openEditor() {
+    const f = curFile; if (!f) return;
+    try { if (!cm) cm = await import('/vendor/codemirror/cm.min.js'); }
+    catch { return toastLine('The editor could not load. Check the connection and try again.'); }
+    if (curFile !== f) return;
+    vEdit.hidden = true; vBody.innerHTML = ''; viewer.classList.add('editing');
+    const wrap = el('div', 'ed'); const host = el('div', 'ed-host');
+    const bar = el('div', 'ed-bar');
+    const tool = (label, fn, aria) => { const b = el('button', 'ed-btn', label); b.setAttribute('aria-label', aria || label); b.onclick = (e) => { e.preventDefault(); buzz(4); fn(); ed && ed.view.focus(); }; bar.append(b); return b; };
+    wrap.append(host, bar); vBody.append(wrap);
+    const wrapC = new cm.Compartment(); let wrapped = store.get('edWrap', true);
+    const view = new cm.EditorView({
+      parent: host,
+      state: cm.EditorState.create({
+        doc: f.r.text || '',
+        extensions: [
+          cm.lineNumbers(), cm.highlightActiveLineGutter(), cm.highlightActiveLine(), cm.highlightSpecialChars(), cm.drawSelection(),
+          cm.history(), cm.indentOnInput(), cm.bracketMatching(), cm.highlightSelectionMatches(),
+          cm.keymap.of([...cm.defaultKeymap, ...cm.historyKeymap, ...cm.searchKeymap, cm.indentWithTab, { key: 'Mod-s', run: () => { saveEdit(); return true; } }]),
+          cm.languageFor(f.path), edHighlight(), edTheme(), wrapC.of(wrapped ? cm.EditorView.lineWrapping : []),
+          cm.EditorView.updateListener.of((u) => { if (u.docChanged && ed && !ed.dirty) { ed.dirty = true; edState(); } }),
+          cm.EditorView.contentAttributes.of({ autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' }),
+        ],
+      }),
+    });
+    ed = { view, project: f.project, path: f.path, r: f.r, dirty: false };
+    tool('Undo', () => cm.undo(view)); tool('Redo', () => cm.redo(view));
+    tool('Tab', () => cm.indentMore(view), 'Indent'); tool('⇤', () => cm.indentLess(view), 'Outdent');
+    tool('Find', () => cm.openSearchPanel(view));
+    const wb = tool(wrapped ? 'No wrap' : 'Wrap', () => { wrapped = !wrapped; store.set('edWrap', wrapped); view.dispatch({ effects: wrapC.reconfigure(wrapped ? cm.EditorView.lineWrapping : []) }); wb.textContent = wrapped ? 'No wrap' : 'Wrap'; });
+    vAct.hidden = false; vAct.textContent = 'Save'; delete vAct.dataset.was; vAct.onclick = () => saveEdit();
+    edState();
+    view.focus();
+  }
+  async function saveEdit(force) {
+    if (!ed || ed.saving) return;
+    const e = ed; e.saving = true; vAct.textContent = 'Saving…';
+    const text = e.view.state.doc.toString();
+    const res = await askFile({ project: e.project, path: e.path, text, mtime: e.r.mtime, force: !!force }, 'save', 30000);
+    e.saving = false; if (ed !== e) return;
+    vAct.textContent = 'Save';
+    if (res.ok) {
+      e.r = { ...e.r, text, mtime: res.mtime, size: res.size }; e.dirty = false;
+      if (curFile) curFile.r = e.r;
+      store.set('file:' + e.project + ':' + e.path, e.r);
+      buzz([8, 30, 8]); edState(); vSub.textContent = 'Saved'; setTimeout(edState, 1500);
+      return;
+    }
+    if (res.conflict) return askConflict();
+    toastLine('Not saved: ' + (res.err === 'offline' ? 'no connection to your computer' : res.err === 'timeout' ? 'the computer did not answer' : res.err));
+    edState();
+  }
+  function sheetChoice(title, note, choices) {
+    sheet.innerHTML = `<div class="grab"></div><div class="sheet-title">${esc(title)}</div>`;
+    if (note) sheet.append(el('div', 'sw-note', esc(note)));
+    for (const [label, fn, cls] of choices) { const b = el('button', cls || '', esc(label)); b.onclick = () => { closeSheet(); fn(); }; sheet.append(b); }
+    sheet.hidden = false; requestAnimationFrame(() => sheet.classList.add('show'));
+  }
+  function askLeave(go) {
+    sheetChoice('You have changes that are not saved', null, [
+      ['Save', async () => { await saveEdit(); if (ed && !ed.dirty) go(); }],
+      ['Throw away changes', () => { if (ed) ed.dirty = false; go(); }, 'danger'],
+      ['Keep editing', () => {}],
+    ]);
+  }
+  function askConflict() {
+    sheetChoice('This file changed on your computer', 'Someone (or Claude) changed it after you opened it here.', [
+      ['Save mine anyway (replace theirs)', () => saveEdit(true), 'danger'],
+      ['Keep editing', () => {}],
+    ]);
+  }
+
+  // ---------- git: what changed, diffs, commit, pull, push (for the project you are in) ----------
+  const GIT_LABEL = { M: 'Changed', A: 'Added', D: 'Deleted', R: 'Renamed', C: 'Copied', U: 'Conflict', '?': 'New' };
+  function gitKind(xy) { const c = xy.trim()[0] || '?'; return xy === '??' ? '?' : c; }
+  async function openGit() {
+    showViewer();
+    vStack.push({ kind: 'git', path: '__git' });
+    closeEditor(); vEdit.hidden = true;
+    const project = curProject();
+    vTitle.textContent = 'Git · ' + project; vSub.textContent = 'Loading…';
+    vAct.hidden = false; vAct.textContent = 'Refresh'; delete vAct.dataset.was; vAct.onclick = () => { buzz(4); vStack.pop(); openGit(); };
+    vBody.innerHTML = '<div class="v-msg">Loading…</div>';
+    const r = await askFile({ project, action: 'status' }, 'git', 30000);
+    if (vStack[vStack.length - 1]?.kind !== 'git') return;
+    if (r.none) { vSub.textContent = ''; vBody.innerHTML = `<div class="v-msg">${esc(project)} is not a git repository.</div>`; vAct.hidden = true; return; }
+    if (r.err) { vBody.innerHTML = `<div class="v-msg">${esc(r.err === 'offline' ? 'No connection.' : r.err)}</div>`; return; }
+    const track = r.track ? ' · ' + r.track.replace(/ahead (\d+)/, '$1 to push').replace(/behind (\d+)/, '$1 to pull') : r.upstream ? ' · up to date' : '';
+    vSub.textContent = (r.branch || 'no branch') + track;
+    vBody.innerHTML = '';
+    const g = el('div', 'git');
+    const sync = el('div', 'git-sync');
+    for (const a of ['pull', 'push']) {
+      const b = el('button', 'git-btn', a === 'pull' ? 'Pull' : 'Push');
+      b.onclick = async () => {
+        buzz(6); b.disabled = true; b.textContent = a === 'pull' ? 'Pulling…' : 'Pushing…';
+        const res = await askFile({ project, action: a }, 'git', 100000);
+        b.disabled = false; b.textContent = a === 'pull' ? 'Pull' : 'Push';
+        g.prepend(el('pre', 'git-out' + (res.ok ? '' : ' bad'), esc(res.ok ? res.out : res.err === 'offline' ? 'No connection.' : res.err)));
+        if (res.ok) { const s2 = await askFile({ project, action: 'status' }, 'git', 30000); if (!s2.err && s2.branch != null) vSub.textContent = (s2.branch || 'no branch') + (s2.track ? ' · ' + s2.track.replace(/ahead (\d+)/, '$1 to push').replace(/behind (\d+)/, '$1 to pull') : ' · up to date'); }
+      };
+      sync.append(b);
+    }
+    g.append(sync);
+    g.append(el('div', 'f-head', r.files.length ? `${r.files.length}${r.more ? '+' : ''} changed file${r.files.length === 1 ? '' : 's'}` : 'No changes'));
+    for (const f of r.files) {
+      const k = gitKind(f.xy);
+      const row = el('button', 'f-row git-file', `<span class="git-k k-${k === '?' ? 'n' : k.toLowerCase()}">${esc(k === '?' ? 'N' : k)}</span><span class="f-name">${esc(f.path)}</span><span class="f-meta">${esc(GIT_LABEL[k] || '')}</span>`);
+      row.onclick = () => { buzz(4); openGitDiff(f.path); };
+      g.append(row);
+    }
+    if (r.files.length) {
+      const form = el('div', 'git-commit');
+      const inp = el('textarea', 'git-msg'); inp.rows = 2; inp.placeholder = 'What did you change?'; inp.setAttribute('aria-label', 'Commit message');
+      const go = el('button', 'primary wide', 'Commit all changes');
+      go.onclick = async () => {
+        const message = inp.value.trim(); if (!message) return inp.focus();
+        buzz(8); go.disabled = true; go.textContent = 'Committing…';
+        const res = await askFile({ project, action: 'commit', message }, 'git', 30000);
+        go.disabled = false; go.textContent = 'Commit all changes';
+        if (!res.ok) return toastLine('Not committed: ' + (res.err === 'offline' ? 'no connection' : res.err));
+        vStack.pop(); openGit();
+      };
+      form.append(inp, go); g.append(form);
+    }
+    if (r.commits.length) {
+      g.append(el('div', 'f-head', 'Recent commits'));
+      for (const c of r.commits) g.append(el('div', 'git-commit-row', `<code>${esc(c.h)}</code><span class="git-s">${esc(c.s)}</span><span class="f-meta">${esc(c.when)}</span>`));
+    }
+    vBody.append(g);
+  }
+  async function openGitDiff(file) {
+    showViewer();
+    vStack.push({ kind: 'gitdiff', path: '__gitdiff', file });
+    vTitle.textContent = base(file); vSub.textContent = file; vAct.hidden = true; vEdit.hidden = true;
+    vBody.innerHTML = '<div class="v-msg">Loading…</div>';
+    const r = await askFile({ project: curProject(), action: 'diff', file }, 'git', 30000);
+    if (vStack[vStack.length - 1]?.file !== file) return;
+    if (r.err) { vBody.innerHTML = `<div class="v-msg">${esc(r.err)}</div>`; return; }
+    const pre = el('pre', 'code-view wrap git-diff');
+    for (const line of (r.diff || 'No differences.').split('\n')) {
+      const cls = /^(\+\+\+|---|diff |index |new file|deleted file|similarity|rename )/.test(line) ? 'd-meta' : line[0] === '+' ? 'tk-add' : line[0] === '-' ? 'tk-del' : line.startsWith('@@') ? 'd-hunk' : '';
+      const sp = el('span', cls); sp.textContent = line + '\n'; pre.append(sp);
+    }
+    vBody.innerHTML = ''; vBody.append(pre);
+    if (r.cut) vBody.prepend(el('div', 'v-note', 'Long diff: showing the first 200 KB.'));
+  }
+  $('gitBtn').onclick = () => { const was = drawerOpen; closeDrawer(); setTimeout(openGit, was ? 200 : 0); };
 
   async function openDir(p = '.', project = curProject(), isBack) {
     showViewer();
@@ -1610,6 +1814,50 @@
   function closeSettings() { if (settings.hidden) return; settings.classList.remove('show'); scrim.classList.remove('show'); setTimeout(() => { settings.hidden = true; if (!drawerOpen) scrim.hidden = true; }, 250); }
   $('settingsBtn').onclick = () => { buzz(4); const was = drawerOpen; closeDrawer(); setTimeout(openSettings, was && !wide.matches ? 180 : 0); };
   $('settingsDone').onclick = closeSettings;
+
+  // ---------- push notifications ----------
+  // The computer only sends a push when no phone has the app on screen, so tell it when we are.
+  function sendVis() { wsSend({ op: 'vis', visible: !document.hidden }); }
+  document.addEventListener('visibilitychange', sendVis);
+  addEventListener('pagehide', () => wsSend({ op: 'vis', visible: false }));
+  const pushOK = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && isSecureContext;
+  const pushSeg = $('pushSeg');
+  async function currentSub() { try { const reg = await navigator.serviceWorker.ready; return await reg.pushManager.getSubscription(); } catch { return null; } }
+  async function showPush() {
+    if (!pushOK()) {
+      $('pushRow').hidden = false; for (const b of pushSeg.children) b.disabled = true;
+      $('pushNote').textContent = ios ? 'On iPhone and iPad: add this app to your Home Screen first (Share, Add to Home Screen), then open it from there.' : 'This browser can\'t receive notifications when the app is closed.';
+      return;
+    }
+    $('pushRow').hidden = false;
+    const on = !!(await currentSub()) && Notification.permission === 'granted';
+    store.set('pushOn', on);
+    for (const b of pushSeg.children) { b.disabled = false; const sel = (b.dataset.v === 'on') === on; b.classList.toggle('on', sel); b.setAttribute('aria-checked', sel); }
+    $('pushTest').hidden = !on;
+    $('pushNote').textContent = on ? 'Your phone is told when Claude needs your approval or has finished, even with the app closed.' : Notification.permission === 'denied' ? 'Notifications are blocked for this app. Allow them in your phone\'s settings, then try again.' : 'Off: you only hear from Claude while the app is open.';
+  }
+  const b64urlToBytes = (t) => { const s2 = atob(String(t).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((t.length + 3) % 4)); return Uint8Array.from(s2, (c) => c.charCodeAt(0)); };
+  pushSeg.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    const want = b.dataset.v === 'on'; buzz(6);
+    if (want) {
+      const perm = await Notification.requestPermission().catch(() => 'denied');
+      if (perm !== 'granted') return showPush();
+      const k = await askFile({}, 'push-key');
+      if (k.err || !k.key) { toastLine('Needs connection'); return showPush(); }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(k.key) });
+        const r = await askFile({ sub: sub.toJSON() }, 'push-sub');
+        if (r.err) throw new Error(r.err);
+      } catch (err) { toastLine('Couldn\'t turn on notifications: ' + (err.message || err)); }
+    } else {
+      const sub = await currentSub();
+      if (sub) { await askFile({ endpoint: sub.endpoint }, 'push-unsub'); try { await sub.unsubscribe(); } catch {} }
+    }
+    showPush();
+  });
+  $('pushTest').onclick = () => { buzz(6); closeSettings(); wsSend({ op: 'push-test' }); toastLine('Test sent. Close the app or switch away to see it.'); };
 
   // ---------- keep the computer awake ----------
   // A sleeping computer can't be reached at all, so this switch stops it sleeping (while plugged in).

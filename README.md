@@ -37,12 +37,16 @@ On a tablet or desktop the chat list stays open on the left:
 - **Approve or deny from the phone.** When Claude wants to run a command or edit a file, a card appears with Allow and Deny.
 - **Continue a chat that is open on the computer (optional).** If Claude Code runs in a tmux session, the phone and the computer show the same conversation.
 - **Voice notes (optional).** Speak instead of typing. The speech is turned into text on your own computer.
-- **Notifications.** The phone tells you when Claude needs your approval or has finished, while the app is open in the background. (No push yet when the app is fully closed.)
+- **Push notifications.** Your phone is told when Claude needs your approval or has finished, even with the app closed. Turn it on in Settings.
 
 **Files between your phone and computer**
 - **Browse** the folders you choose: your projects, plus others like Downloads (or your whole home folder, with the fingerprint lock on).
 - **Open almost anything** right on the phone: PDFs (with zoom), Word, Excel and PowerPoint files (turned into PDF on your computer by LibreOffice, if installed), videos and audio with seeking, CSV files as tables, plus text, code, Markdown and images.
 - **Save to the phone** any file from the computer, and **upload** photos and files from the phone into any of those folders.
+- **Edit** text and code files in a real code editor (CodeMirror): syntax colours for about 20 languages, line numbers, undo, search, and a toolbar for Tab and indent. If the file changed on the computer while you were editing, it asks before replacing it.
+
+**Git**
+- See **what changed** in a project, open the **diff** of any file, **commit** everything with a message, and **pull** or **push**, from the phone.
 
 **Terminal**
 - **Run commands on your computer** and see what they print, in a screen built for a phone.
@@ -73,14 +77,14 @@ Tether is a different kind of tool: a companion for your whole computer. Claude 
 
 | | Remote Control (official) | Tether |
 |---|---|---|
-| What you get | A Claude Code chat | Claude Code, plus files both ways, a terminal and a system monitor |
+| What you get | A Claude Code chat | Claude Code, plus files both ways, document viewers, a code editor, git, a terminal and a system monitor |
 | Setup | Run `claude --remote-control`, open the Claude app | Run a small server, set up Tailscale, pair the phone |
 | Where the chat is stored | Its docs say the transcript is stored on Anthropic servers while connected | On your computer only |
 | How the phone reaches the computer | Through Anthropic's service | Directly, over your own Tailscale network |
 | Who runs it | Anthropic | You. The code is here to read and change |
 | Starting a chat while you're away | A Claude Code session or its server mode has to be running on the computer already. Server mode works in the one folder it was started in | The server starts with the computer. Pick any of your project folders from the phone |
 | How it looks | The official Claude app's design | Your own. Every colour and screen is a file you can edit |
-| Notifications | Push notifications, also when the app is closed | Only while the app is still open in the background. No push yet |
+| Notifications | Push notifications, also when the app is closed | Push notifications too, also when the app is closed (turn on in Settings) |
 | Long network drops | Its docs say server mode gives up after about 10 minutes | The server keeps running; the phone catches up whenever it returns |
 
 Claude's own requests still go to Anthropic, the same as when you use Claude Code in a terminal. Tether changes where the chat history lives and how the phone connects, not that.
@@ -96,6 +100,7 @@ This app lets a phone **run commands on your computer** through Claude Code. Tre
 - Anyone with the pairing QR code or link can use Claude on your computer. Don't share or screenshot it. To make a new key: delete `data/token`, restart, and pair again.
 - The phone can only see the folders you list in `config.json`. Common secret files (like `.env`, SSH keys and `.npmrc`) are refused, and hidden folders are not listed. Inside a project, Claude itself can still read whatever it is allowed to. Don't add your whole home folder unless you mean to.
 - The **Terminal** screen is off unless you turn it on, because it runs commands with no approval step.
+- The **editor** and **git** screens change files and can push to your remotes with the computer's own git login. They follow the same folder rules as Files: only your listed folders, never hidden folders or secret files.
 - **With the fingerprint lock off, the key is the only protection.** Whoever has it can use Claude on your computer, and could even turn the lock on with their own device. Turn on the **fingerprint lock** (in Settings) right after pairing: then the key alone is not enough, and anyone who got in with only the key is disconnected. If you lose the phone, delete `data/passkeys.json` and `data/token` on the computer, restart, and pair again.
 - Claude Code's own rules still apply: your `CLAUDE.md`, allow and deny lists, and hooks. Anything not already allowed asks you first.
 
@@ -173,13 +178,10 @@ Or by hand:
 
 **On the phone, for notifications**
 
-Notifications only arrive while the app is still running in the background, so help the phone keep it there:
-
-- Tap **Allow** when the app asks to send notifications.
-- Don't swipe the app away from your recent apps. If your phone can lock an app there, lock it.
-- Android: set battery use to **Unrestricted** for Chrome (the app runs inside Chrome). On most phones: Settings → Apps → Chrome → Battery.
-
-Even with all of that, the phone can still pause the app after a while, and then notifications stop until you open it again. iPhones pause it almost at once. Real push notifications, which arrive when the app is closed, are not built yet.
+- In the app: **Settings → Notifications when the app is closed → On**, then tap **Allow**. Use **Send a test** to check it.
+- **iPhone and iPad:** add the app to your Home Screen first (Share → Add to Home Screen) and open it from there. Apple only allows notifications for installed web apps (iOS 16.4 and newer).
+- You get a notification when Claude needs your approval or has finished, but not while the app is open on screen. For a chat that is open on the computer, only while the phone is the one driving it, so you aren't buzzed while you sit at the computer.
+- Notifications travel through your phone's push service (Google for Android, Apple for iPhone). The message is encrypted on your computer, so the push service can't read it.
 
 ## Settings
 
@@ -346,7 +348,7 @@ If you try one of the untested ones, please open an issue and say what happened,
 
 - `server.mjs` is one Node server. It runs Claude Code through the Claude Agent SDK and keeps an event log for every chat.
 - The phone connects with a WebSocket and asks for "everything after event N", which is how it catches up after losing signal.
-- `public/` is the phone app: plain HTML, CSS and JavaScript, with no build step. A service worker lets it open with no signal.
+- `public/` is the phone app: plain HTML, CSS and JavaScript, with no build step. Two larger pieces are included ready-made and load only when needed: PDF.js in `public/vendor/pdfjs` and the CodeMirror editor in `public/vendor/codemirror` (rebuilt with `art/build-codemirror.sh`). A service worker lets it open with no signal.
 - `data/` holds the key and the chat logs. It stays on your computer and is not in git.
 
 ## License

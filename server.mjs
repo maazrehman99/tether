@@ -13,6 +13,7 @@ import { WebSocketServer } from 'ws';
 import { execFileSync, execFile, spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { query, listSessions, getSessionMessages } from '@anthropic-ai/claude-agent-sdk';
+import * as webpush from 'web-push';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DATA = process.env.CM_DATA || path.join(ROOT, 'data');
@@ -169,6 +170,9 @@ function newChat(project, extra = {}) {
 // persist=false for streaming text pieces (the final text replaces them).
 function emit(chat, ev, persist = true) {
   events(chat);
+  // Who spoke last: for a chat open on the computer, notifications go to the phone only while the
+  // phone is the one driving it (not while you sit at the computer and type there).
+  if (ev.t === 'user') chat.phoneDriving = ev.src !== 'pc';
   ev.seq = ++chat.seq;
   chat.events.push(ev);
   if (persist) {
@@ -322,8 +326,6 @@ class Runner {
       if (d) ev.detail = d;
       ev.always = !!(suggestions && suggestions.length);
     }
-    emit(chat, ev);
-    broadcastMeta(chat);
     return new Promise((resolve) => {
       const done = (res, ok, why) => {
         if (!this.perms.has(id)) return;
@@ -332,7 +334,10 @@ class Runner {
         broadcastMeta(chat);
         resolve(res);
       };
+      // Mark the chat as waiting first, then show the card: the "needs you" state and its notification go out together.
       this.perms.set(id, { name, input, suggestions, done });
+      emit(chat, ev);
+      broadcastMeta(chat);
       signal && signal.addEventListener('abort', () => done({ behavior: 'deny', message: 'Cancelled' }, false, 'cancelled'));
     });
   }
@@ -1242,6 +1247,58 @@ function runCommand(ws, msg) {
   child.on('close', (code, signal) => end(code, signal));
 }
 
+// ---------- git (project folders only) ----------
+function git(cwd, args, timeout = 15000) {
+  return new Promise((resolve) => {
+    execFile('git', args, { cwd, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8',
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_PAGER: 'cat', PAGER: 'cat', LC_ALL: 'C', GIT_OPTIONAL_LOCKS: '0' } },
+      (e, out, err) => resolve({ ok: !e, out: out || '', err: (err || (e && e.message) || '').trim(), killed: !!(e && e.killed) }));
+  });
+}
+async function gitOp(ws, msg) {
+  const reply = (r) => send(ws, { op: 'git', rid: msg.rid, ...r });
+  const project = has(PROJECTS, msg.project) ? msg.project : DEFAULT_PROJECT;
+  const cwd = PROJECTS[project];
+  const top = await git(cwd, ['rev-parse', '--show-toplevel']);
+  if (!top.ok) return reply({ none: true, project });
+  const root = top.out.trim();
+  const a = msg.action;
+  if (a === 'status') {
+    const [st, lg] = await Promise.all([git(root, ['status', '--porcelain=v1', '-b', '-uall']), git(root, ['log', '--format=%h%x09%ar%x09%s', '-8'])]);
+    if (!st.ok) return reply({ err: st.err });
+    const lines = st.out.split('\n').filter(Boolean);
+    const head = (lines[0] || '').replace(/^## /, '');
+    const m = /^(.*?)(?:\.\.\.(\S+))?(?: \[(.*)\])?$/.exec(head) || [];
+    const files = lines.slice(1, 301).map((l) => ({ xy: l.slice(0, 2), path: l.slice(3).replace(/^.* -> /, '') }));
+    const commits = lg.ok ? lg.out.split('\n').filter(Boolean).map((l) => { const [h, when, ...rest] = l.split('\t'); return { h, when, s: rest.join('\t') }; }) : [];
+    return reply({ project, root: tilde(root), branch: (m[1] || '').replace(/^No commits yet on /, ''), upstream: m[2] || null, track: m[3] || '', files, more: lines.length - 1 > 300, commits });
+  }
+  if (a === 'diff') {
+    const f = String(msg.file || '');
+    if (!f || f.startsWith('-') || path.isAbsolute(f) || f.split(/[\\/]/).includes('..')) return reply({ err: 'Bad file name' });
+    let d = await git(root, ['diff', 'HEAD', '--no-color', '--', f]);
+    if (d.ok && !d.out) d = await git(root, ['diff', '--no-color', '--no-index', '--', '/dev/null', f]);   // a new, untracked file
+    const out = (d.out || d.err || '').slice(0, 200000);
+    return reply({ diff: out, cut: (d.out || '').length > 200000 });
+  }
+  if (a === 'commit') {
+    const message = String(msg.message || '').trim();
+    if (!message) return reply({ err: 'Write a short message first.' });
+    const add = await git(root, ['add', '-A']);
+    if (!add.ok) return reply({ err: add.err });
+    const c = await git(root, ['commit', '-m', message.slice(0, 5000)]);
+    log('git', 'commit in', tilde(root), c.ok ? 'ok' : 'failed');
+    return reply(c.ok ? { ok: true, out: c.out.trim() } : { err: c.err || c.out.trim() });
+  }
+  if (a === 'pull' || a === 'push') {
+    const r = await git(root, a === 'pull' ? ['pull', '--ff-only'] : ['push'], 90000);
+    log('git', a, 'in', tilde(root), r.ok ? 'ok' : 'failed');
+    const text = (r.out + '\n' + r.err).trim();
+    return reply(r.ok ? { ok: true, out: text || 'Done.' } : { err: r.killed ? 'It took too long (over 90 seconds).' : (text || 'Failed.') });
+  }
+  return reply({ err: 'Unknown git action' });
+}
+
 // ---------- this computer: CPU, memory, disk, battery (read-only) ----------
 let cpuPrev = null;
 function cpuSnap() {
@@ -1364,6 +1421,46 @@ function broadcast(chat, ev) {
 function broadcastMeta(chat) {
   const s = chatSummary(chat);
   for (const ws of clients) send(ws, { op: 'meta', chat: s });
+  pushOnChange(chat, s);
+}
+
+// ---------- push notifications (reach the phone even when the app is closed) ----------
+// Standard Web Push: the phone gives us an address at its push service (Google for Chrome on Android,
+// Apple for an installed app on iPhone), and we send it an encrypted message. The push service can't
+// read it. Keys for this computer live in data/vapid.json, the phones' addresses in data/push.json.
+const VAPID_FILE = path.join(DATA, 'vapid.json'), SUBS_FILE = path.join(DATA, 'push.json');
+let vapid;
+try { vapid = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8')); }
+catch { vapid = webpush.generateVAPIDKeys(); fs.writeFileSync(VAPID_FILE, JSON.stringify(vapid), { mode: 0o600 }); }
+webpush.setVapidDetails('https://github.com/maazrehman99/tether', vapid.publicKey, vapid.privateKey);
+let pushSubs = [];
+try { pushSubs = JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8')); } catch {}
+const saveSubs = () => fs.writeFileSync(SUBS_FILE, JSON.stringify(pushSubs, null, 1), { mode: 0o600 });
+function validSub(x) {
+  return x && typeof x.endpoint === 'string' && /^https:\/\//.test(x.endpoint) && x.endpoint.length < 2000
+    && x.keys && typeof x.keys.p256dh === 'string' && typeof x.keys.auth === 'string';
+}
+// Send to every phone, unless one of them has the app open on screen (it shows the news itself).
+function pushAll(title, body, tag) {
+  if (!pushSubs.length) return;
+  for (const c of clients) if (c.visible) return;
+  const payload = JSON.stringify({ title: String(title).slice(0, 80), body: String(body || '').slice(0, 160), tag: tag || 'tether' });
+  for (const sub of [...pushSubs]) {
+    webpush.sendNotification(sub, payload, { TTL: 3600, urgency: 'high' }).catch((e) => {
+      // 404/410: the phone dropped this address (app removed, permission off). Forget it.
+      if (e && (e.statusCode === 404 || e.statusCode === 410)) { pushSubs = pushSubs.filter((x) => x.endpoint !== sub.endpoint); saveSubs(); log('push', 'removed an expired phone'); }
+      else log('push', 'failed:', (e && (e.statusCode || e.message)) || e);
+    });
+  }
+}
+// "Needs your approval" when a chat starts waiting, "Finished" when it stops working.
+function pushOnChange(chat, s) {
+  const was = chat.pushState || { busy: false, waiting: false };
+  chat.pushState = { busy: !!s.busy, waiting: !!s.waiting };
+  if (s.pc && !chat.phoneDriving) return;
+  const where = s.pc ? s.project + ' on your computer' : (s.title || s.project || 'Chat');
+  if (s.waiting && !was.waiting) pushAll('Claude needs your approval', where, 'perm-' + s.id);
+  else if (was.busy && !s.busy && !s.waiting) pushAll('Claude finished', where, 'done-' + s.id);
 }
 
 function chatList() {
@@ -1476,8 +1573,49 @@ async function handle(ws, msg) {
       await new Promise((r) => setTimeout(r, 250));   // give the lock a moment to start, or fail
       return send(ws, { op: 'awake', rid: msg.rid, ...awakeState() });
     }
+    // Push notifications: the phone turns them on or off, and says when the app is on screen.
+    case 'push-key': return send(ws, { op: 'push-key', rid: msg.rid, key: vapid.publicKey, on: pushSubs.length > 0 });
+    case 'push-sub': {
+      if (!validSub(msg.sub)) return send(ws, { op: 'push-key', rid: msg.rid, err: 'Bad subscription' });
+      pushSubs = pushSubs.filter((x) => x.endpoint !== msg.sub.endpoint).slice(-9);   // at most 10 phones
+      pushSubs.push({ endpoint: msg.sub.endpoint, keys: { p256dh: msg.sub.keys.p256dh, auth: msg.sub.keys.auth }, added: Date.now() });
+      saveSubs(); log('push', 'a phone turned notifications on');
+      return send(ws, { op: 'push-key', rid: msg.rid, ok: true });
+    }
+    case 'push-unsub': {
+      pushSubs = pushSubs.filter((x) => x.endpoint !== String(msg.endpoint || '')); saveSubs();
+      return send(ws, { op: 'push-key', rid: msg.rid, ok: true });
+    }
+    case 'push-test': { const v = ws.visible; ws.visible = false; const any = [...clients].some((c) => c.visible); pushAll('Tether', any ? 'Test (the app is open on another device, so this may not show)' : 'Notifications work.', 'test'); ws.visible = v; return; }
+    case 'vis': { ws.visible = !!msg.visible; return; }
     case 'run': return runCommand(ws, msg);
     case 'run-stop': { if (ws.run) { ws.runWhy = 'Stopped.'; ws.run.kill(); } return; }
+    // Git for a project folder: see what changed, read a diff, commit everything, pull, push.
+    case 'git': return gitOp(ws, msg);
+    // Save a text file edited on the phone. Same folders and rules as reading; never into hidden folders.
+    // If the file changed on the computer since the phone opened it, nothing is written and the phone is told.
+    case 'save': {
+      const project = has(ROOTS, msg.project) ? msg.project : DEFAULT_PROJECT;
+      const reply = (r) => send(ws, { op: 'save', rid: msg.rid, ...r });
+      const text = typeof msg.text === 'string' ? msg.text : null;
+      if (text == null) return reply({ err: 'Nothing to save.' });
+      if (Buffer.byteLength(text) > 2 * 1024 * 1024) return reply({ err: 'Too big to save from the phone (over 2 MB).' });
+      const sp = safePath(project, msg.path);
+      if (!sp || sp.err) return reply({ err: sp ? sp.err : 'Unknown project' });
+      if (sp.hasDot) return reply({ err: 'Files in hidden folders can\'t be changed from the phone.' });
+      let st; try { st = fs.statSync(sp.real); } catch { return reply({ err: 'File not found' }); }
+      if (!st.isFile()) return reply({ err: 'This is not a regular file.' });
+      if (!msg.force && msg.mtime && Math.abs(st.mtimeMs - msg.mtime) > 1) return reply({ conflict: true, err: 'This file changed on your computer since you opened it.' });
+      // Write a temporary file next to it, then swap it in: a dropped connection never leaves half a file.
+      const tmp = path.join(path.dirname(sp.real), '.' + path.basename(sp.real) + '.tether-' + crypto.randomBytes(4).toString('hex'));
+      try {
+        fs.writeFileSync(tmp, text, { mode: st.mode & 0o777, flag: 'wx' });
+        fs.renameSync(tmp, sp.real);
+      } catch (e) { fs.rmSync(tmp, { force: true }); return reply({ err: 'Could not save: ' + e.message }); }
+      log('save', tilde(sp.real), Buffer.byteLength(text), 'bytes');
+      const now = fs.statSync(sp.real);
+      return reply({ ok: true, mtime: now.mtimeMs, size: now.size });
+    }
     // Open a PDF, an office file (as PDF), a video or a song in the phone's viewer.
     case 'media': {
       const project = has(ROOTS, msg.project) ? msg.project : DEFAULT_PROJECT;

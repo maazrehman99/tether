@@ -84,6 +84,7 @@
     <button id="filesBtn" class="tool"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5H10l2 2h6.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg><span>Files</span></button>
     <button id="sysBtn" class="tool"><svg viewBox="0 0 24 24" width="22" height="22"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M8.5 19.5h7M7 12l2.6-3 2.4 2.2L14.6 8 17 11" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Computer</span></button>
     <button id="termBtn" class="tool" hidden><svg viewBox="0 0 24 24" width="22" height="22"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M7.5 10l3 2.5-3 2.5M12.5 15h4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Terminal</span></button>
+    <button id="gitBtn" class="tool"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="6" cy="6" r="2.2" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="6" cy="18" r="2.2" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="18" cy="8" r="2.2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M6 8.2v7.6M18 10.2c0 4-6 3.5-11 6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg><span>Git</span></button>
   </div>
   <div id="chatList"></div>
   <div id="termList" hidden></div>
@@ -104,6 +105,10 @@
     <button data-v="off" role="radio">Off</button><button data-v="on" role="radio">On</button></div>
     <div class="sw-note" id="lockNote"></div>
     <button id="lockNow" class="drawer-link" hidden>Lock now</button></div>
+  <div class="theme-row" id="pushRow" hidden><div class="sw-title">Notifications when the app is closed</div><div class="seg" id="pushSeg" role="radiogroup" aria-label="Push notifications">
+    <button data-v="off" role="radio">Off</button><button data-v="on" role="radio">On</button></div>
+    <div class="sw-note" id="pushNote"></div>
+    <button id="pushTest" class="drawer-link" hidden>Send a test</button></div>
   <div class="theme-row" id="awakeRow" hidden><div class="sw-title">Keep computer awake</div><div class="seg" id="awakeSeg" role="radiogroup" aria-label="Keep computer awake">
     <button data-v="off" role="radio">Off</button><button data-v="on" role="radio">On</button></div>
     <div class="sw-note" id="awakeNote"></div></div>
@@ -119,6 +124,7 @@
       <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <div class="v-titles"><div id="vTitle"></div><div id="vSub"></div></div>
+    <button id="vEdit" class="v-act" hidden>Edit</button>
     <button id="vAct" class="v-act"></button>
   </header>
   <div id="vBody"></div>
