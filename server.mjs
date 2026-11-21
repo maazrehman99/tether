@@ -1577,8 +1577,10 @@ async function handle(ws, msg) {
     case 'push-key': return send(ws, { op: 'push-key', rid: msg.rid, key: vapid.publicKey, on: pushSubs.length > 0 });
     case 'push-sub': {
       if (!validSub(msg.sub)) return send(ws, { op: 'push-key', rid: msg.rid, err: 'Bad subscription' });
-      pushSubs = pushSubs.filter((x) => x.endpoint !== msg.sub.endpoint).slice(-9);   // at most 10 phones
-      pushSubs.push({ endpoint: msg.sub.endpoint, keys: { p256dh: msg.sub.keys.p256dh, auth: msg.sub.keys.auth }, added: Date.now() });
+      // One address per phone: a phone that turns notifications on again replaces its old address.
+      const device = typeof msg.device === 'string' ? msg.device.slice(0, 64) : null;
+      pushSubs = pushSubs.filter((x) => x.endpoint !== msg.sub.endpoint && !(device && x.device === device)).slice(-9);   // at most 10 phones
+      pushSubs.push({ endpoint: msg.sub.endpoint, keys: { p256dh: msg.sub.keys.p256dh, auth: msg.sub.keys.auth }, device, added: Date.now() });
       saveSubs(); log('push', 'a phone turned notifications on');
       return send(ws, { op: 'push-key', rid: msg.rid, ok: true });
     }

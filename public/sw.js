@@ -1,7 +1,7 @@
 // Keeps the app on the phone so it opens with no signal.
 // Online: always ask the PC first (a tiny "not changed" check when nothing changed), so updates show at once.
 // Offline or slow (over 2.5 s): use the saved copy.
-const CACHE = 'tether-v3';
+const CACHE = 'tether-v4';
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/md.js', '/theme.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/icon.svg', '/apple-touch-icon.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });

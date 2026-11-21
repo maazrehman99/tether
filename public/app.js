@@ -1830,15 +1830,23 @@
       return;
     }
     $('pushRow').hidden = false;
-    const on = !!(await currentSub()) && Notification.permission === 'granted';
+    const sub = await currentSub();
+    const on = !!sub && Notification.permission === 'granted';
     store.set('pushOn', on);
+    // Re-send this phone's address on every connect, so the computer always has the current one.
+    if (on && !showPush.sent) { showPush.sent = true; let device = store.get('device', null); if (!device) { device = rid() + rid(); store.set('device', device); } askFile({ sub: sub.toJSON(), device }, 'push-sub'); }
     for (const b of pushSeg.children) { b.disabled = false; const sel = (b.dataset.v === 'on') === on; b.classList.toggle('on', sel); b.setAttribute('aria-checked', sel); }
     $('pushTest').hidden = !on;
     $('pushNote').textContent = on ? 'Your phone is told when Claude needs your approval or has finished, even with the app closed.' : Notification.permission === 'denied' ? 'Notifications are blocked for this app. Allow them in your phone\'s settings, then try again.' : 'Off: you only hear from Claude while the app is open.';
   }
   const b64urlToBytes = (t) => { const s2 = atob(String(t).replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((t.length + 3) % 4)); return Uint8Array.from(s2, (c) => c.charCodeAt(0)); };
+  let pushBusy = false;
   pushSeg.addEventListener('click', async (e) => {
-    const b = e.target.closest('button'); if (!b || b.disabled) return;
+    const b = e.target.closest('button'); if (!b || b.disabled || pushBusy) return;
+    pushBusy = true;
+    try { await pushToggle(b); } finally { pushBusy = false; }
+  });
+  async function pushToggle(b) {
     const want = b.dataset.v === 'on'; buzz(6);
     if (want) {
       const perm = await Notification.requestPermission().catch(() => 'denied');
@@ -1848,7 +1856,8 @@
       try {
         const reg = await navigator.serviceWorker.ready;
         const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(k.key) });
-        const r = await askFile({ sub: sub.toJSON() }, 'push-sub');
+        let device = store.get('device', null); if (!device) { device = rid() + rid(); store.set('device', device); }
+        const r = await askFile({ sub: sub.toJSON(), device }, 'push-sub');
         if (r.err) throw new Error(r.err);
       } catch (err) { toastLine('Couldn\'t turn on notifications: ' + (err.message || err)); }
     } else {
@@ -1856,7 +1865,7 @@
       if (sub) { await askFile({ endpoint: sub.endpoint }, 'push-unsub'); try { await sub.unsubscribe(); } catch {} }
     }
     showPush();
-  });
+  }
   $('pushTest').onclick = () => { buzz(6); closeSettings(); wsSend({ op: 'push-test' }); toastLine('Test sent. Close the app or switch away to see it.'); };
 
   // ---------- keep the computer awake ----------
