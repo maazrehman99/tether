@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#111318">
+<script src="/theme.js"></script>
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Tether">
+<meta name="format-detection" content="telephone=no">
+<title>Tether</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <button id="menuBtn" class="icon-btn" aria-label="Chats">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+    </button>
+    <div id="titleWrap">
+      <div id="title">New chat</div>
+      <div id="sub"><span id="dot" class="dot"></span><span id="subText">Connecting…</span><span id="clock"></span></div>
+    </div>
+    <button id="newBtn" class="icon-btn" aria-label="New chat">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+    </button>
+  </header>
+  <div id="banner" hidden></div>
+
+  <main id="log" tabindex="-1">
+    <div id="empty">
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"><path d="M150 164 262 256 150 348"/><path d="M292 348h70"/></g><circle class="mark-dot" cx="356" cy="170" r="30"/></svg>
+      <p class="empty-title">What are we working on?</p>
+      <p class="empty-hint" id="emptyHint"></p>
+      <div class="chips" id="emptyProjects" role="radiogroup" aria-label="Project"></div>
+    </div>
+    <div id="msgs"></div>
+    <div id="working" hidden><span class="pulse"></span><span id="workingText">Working</span></div>
+  </main>
+
+  <button id="jump" hidden aria-label="Scroll to latest">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 5v13M6 12l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+  </button>
+
+  <footer id="composer">
+    <div id="atts" hidden></div>
+    <div id="box">
+      <button id="attachBtn" class="round ghost" aria-label="Attach a file or photo">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+      <input id="fileIn" type="file" multiple hidden>
+      <textarea id="input" rows="1" placeholder="Message Claude Code" enterkeyhint="enter" autocomplete="off" spellcheck="true"></textarea>
+      <button id="micBtn" class="round ghost" aria-label="Record a voice note">
+        <svg viewBox="0 0 24 24" width="22" height="22"><rect x="9" y="3" width="6" height="12" rx="3" stroke="currentColor" stroke-width="1.9" fill="none"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/></svg>
+      </button>
+      <button id="sendBtn" class="round" aria-label="Send" disabled>
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      </button>
+      <button id="stopBtn" class="round" aria-label="Stop" hidden>
+        <svg viewBox="0 0 24 24" width="16" height="16"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>
+      </button>
+    </div>
+    <div id="statusline" aria-hidden="true"><span id="statusText"></span></div>
+  </footer>
+</div>
+
+<div id="scrim" hidden></div>
+<nav id="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <div class="seg" id="projects"></div>
+  </div>
+  <button id="drawerNew" class="drawer-new">
+    <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>
+    <span id="drawerNewText">New chat</span>
+  </button>
+  <div class="tools">
+    <button id="filesBtn" class="tool"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 6.5A1.5 1.5 0 0 1 5.5 5H10l2 2h6.5A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg><span>Files</span></button>
+    <button id="sysBtn" class="tool"><svg viewBox="0 0 24 24" width="22" height="22"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.8" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M8.5 19.5h7M7 12l2.6-3 2.4 2.2L14.6 8 17 11" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Computer</span></button>
+    <button id="termBtn" class="tool" hidden><svg viewBox="0 0 24 24" width="22" height="22"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M7.5 10l3 2.5-3 2.5M12.5 15h4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Terminal</span></button>
+  </div>
+  <div id="chatList"></div>
+  <div id="termList" hidden></div>
+  <button id="settingsBtn" class="drawer-new drawer-settings">
+    <svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>
+    Settings
+  </button>
+</nav>
+
+<div id="settings" class="sheetlike" hidden>
+  <div class="grab"></div>
+  <div class="sheet-title">Settings</div>
+  <div class="theme-row"><div class="sw-title">Theme</div><div class="seg" id="themeSeg" role="radiogroup" aria-label="Theme">
+    <button data-t="auto" role="radio">Auto</button><button data-t="light" role="radio">Light</button><button data-t="dark" role="radio">Dark</button></div></div>
+  <div class="theme-row"><div class="sw-title">Look</div><div class="seg" id="lookSeg" role="radiogroup" aria-label="Look">
+    <button data-l="soft" role="radio">Soft</button><button data-l="terminal" role="radio">Terminal</button></div></div>
+  <div class="theme-row" id="lockRow" hidden><div class="sw-title">Fingerprint lock</div><div class="seg" id="lockSeg" role="radiogroup" aria-label="Fingerprint lock">
+    <button data-v="off" role="radio">Off</button><button data-v="on" role="radio">On</button></div>
+    <div class="sw-note" id="lockNote"></div>
+    <button id="lockNow" class="drawer-link" hidden>Lock now</button></div>
+  <div class="theme-row" id="awakeRow" hidden><div class="sw-title">Keep computer awake</div><div class="seg" id="awakeSeg" role="radiogroup" aria-label="Keep computer awake">
+    <button data-v="off" role="radio">Off</button><button data-v="on" role="radio">On</button></div>
+    <div class="sw-note" id="awakeNote"></div></div>
+  <div class="drawer-foot" id="foot"></div>
+  <button id="settingsDone" class="sheet-done">Done</button>
+</div>
+
+<div id="sheet" hidden></div>
+
+<section id="viewer" hidden aria-modal="true">
+  <header class="v-top">
+    <button id="vBack" class="icon-btn" aria-label="Back">
+      <svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="v-titles"><div id="vTitle"></div><div id="vSub"></div></div>
+    <button id="vAct" class="v-act"></button>
+  </header>
+  <div id="vBody"></div>
+</section>
+
+<div id="lock" hidden>
+  <div class="setup-card">
+    <svg class="mark" viewBox="0 0 512 512" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"><path d="M150 164 262 256 150 348"/><path d="M292 348h70"/></g><circle class="mark-dot" cx="356" cy="170" r="30"/></svg>
+    <h1>Locked</h1>
+    <p class="lock-p">Use your fingerprint, face or screen lock to open.</p>
+    <button id="unlockBtn" class="primary wide">Unlock</button>
+    <p id="lockErr" class="err" role="alert"></p>
+  </div>
+</div>
+
+<div id="setup" hidden>
+  <div class="setup-card">
+    <svg class="mark" viewBox="0 0 512 512" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"><path d="M150 164 262 256 150 348"/><path d="M292 348h70"/></g><circle class="mark-dot" cx="356" cy="170" r="30"/></svg>
+    <h1>Connect to your computer</h1>
+    <ol class="setup-steps">
+      <li>On your computer, in the app folder, run <code>npm run pair</code></li>
+      <li>Scan the QR code with this phone's camera</li>
+    </ol>
+    <p class="setup-or">or paste the key it prints</p>
+    <input id="keyInput" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Key" aria-label="Key">
+    <button id="keySave" class="primary wide">Connect</button>
+    <p id="setupErr" class="err" role="alert"></p>
+  </div>
+</div>
+
+<script src="/md.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

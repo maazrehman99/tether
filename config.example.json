@@ -1,0 +1,19 @@
+{
+  "projects": {
+    "my-app": "~/code/my-app",
+    "notes": {
+      "path": "~/notes",
+      "tmux": "notes"
+    }
+  },
+  "folders": {
+    "Downloads": "~/Downloads"
+  },
+  "voice": {
+    "python": "~/.venvs/tether/bin/python",
+    "model": "small",
+    "hints": "my-app, Postgres, Kubernetes"
+  },
+  "uploads": "~/Downloads/tether-uploads",
+  "terminal": false
+}
