@@ -1815,6 +1815,11 @@
   $('settingsBtn').onclick = () => { buzz(4); const was = drawerOpen; closeDrawer(); setTimeout(openSettings, was && !wide.matches ? 180 : 0); };
   $('settingsDone').onclick = closeSettings;
 
+  // ---------- report errors to the computer's log (so phone problems can be fixed) ----------
+  const clog = (text) => wsSend({ op: 'clientlog', text: 'v' + VERSION + ' ' + text });
+  addEventListener('error', (e) => clog('error: ' + (e.message || e) + ' @' + (e.lineno || '')));
+  addEventListener('unhandledrejection', (e) => clog('unhandled: ' + ((e.reason && (e.reason.message || e.reason)) || e)));
+
   // ---------- push notifications ----------
   // The computer only sends a push when no phone has the app on screen, so tell it when we are.
   function sendVis() { wsSend({ op: 'vis', visible: !document.hidden }); }
@@ -1822,7 +1827,7 @@
   addEventListener('pagehide', () => wsSend({ op: 'vis', visible: false }));
   const pushOK = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && isSecureContext;
   const pushSeg = $('pushSeg');
-  async function currentSub() { try { const reg = await navigator.serviceWorker.ready; return await reg.pushManager.getSubscription(); } catch { return null; } }
+  async function currentSub() { try { const reg = await within(navigator.serviceWorker.ready, 8000, 'worker'); return await reg.pushManager.getSubscription(); } catch (e) { clog('push: no worker yet: ' + e.message); return null; } }
   async function showPush() {
     if (!pushOK()) {
       $('pushRow').hidden = false; for (const b of pushSeg.children) b.disabled = true;
@@ -1846,20 +1851,25 @@
     pushBusy = true;
     try { await pushToggle(b); } finally { pushBusy = false; }
   });
+  // Waits for a step, but never for ever: a stuck step used to leave the switch dead with no message.
+  const within = (p, ms, what) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error(what + ' did not answer')), ms))]);
   async function pushToggle(b) {
     const want = b.dataset.v === 'on'; buzz(6);
+    clog('push: tapped ' + (want ? 'on' : 'off') + ', permission=' + Notification.permission + ', sw=' + !!navigator.serviceWorker.controller);
     if (want) {
-      const perm = await Notification.requestPermission().catch(() => 'denied');
+      const perm = await within(Notification.requestPermission(), 30000, 'The permission prompt').catch((e) => { clog('push: ' + e.message); return 'denied'; });
+      clog('push: permission ' + perm);
       if (perm !== 'granted') return showPush();
       const k = await askFile({}, 'push-key');
       if (k.err || !k.key) { toastLine('Needs connection'); return showPush(); }
       try {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(k.key) });
+        const reg = await within(navigator.serviceWorker.ready, 10000, 'The app\'s background worker');
+        const sub = (await reg.pushManager.getSubscription()) || await within(reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64urlToBytes(k.key) }), 20000, 'The phone\'s push service');
+        clog('push: got an address from ' + new URL(sub.endpoint).host);
         let device = store.get('device', null); if (!device) { device = rid() + rid(); store.set('device', device); }
         const r = await askFile({ sub: sub.toJSON(), device }, 'push-sub');
         if (r.err) throw new Error(r.err);
-      } catch (err) { toastLine('Couldn\'t turn on notifications: ' + (err.message || err)); }
+      } catch (err) { clog('push: failed: ' + (err.message || err)); toastLine('Couldn\'t turn on notifications: ' + (err.message || err)); }
     } else {
       const sub = await currentSub();
       if (sub) { await askFile({ endpoint: sub.endpoint }, 'push-unsub'); try { await sub.unsubscribe(); } catch {} }

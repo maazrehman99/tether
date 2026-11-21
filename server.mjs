@@ -1574,9 +1574,9 @@ async function handle(ws, msg) {
       return send(ws, { op: 'awake', rid: msg.rid, ...awakeState() });
     }
     // Push notifications: the phone turns them on or off, and says when the app is on screen.
-    case 'push-key': return send(ws, { op: 'push-key', rid: msg.rid, key: vapid.publicKey, on: pushSubs.length > 0 });
+    case 'push-key': log('push', 'a phone asked for the push key'); return send(ws, { op: 'push-key', rid: msg.rid, key: vapid.publicKey, on: pushSubs.length > 0 });
     case 'push-sub': {
-      if (!validSub(msg.sub)) return send(ws, { op: 'push-key', rid: msg.rid, err: 'Bad subscription' });
+      if (!validSub(msg.sub)) { log('push', 'refused a phone address:', JSON.stringify(msg.sub || null).slice(0, 120)); return send(ws, { op: 'push-key', rid: msg.rid, err: 'Bad subscription' }); }
       // One address per phone: a phone that turns notifications on again replaces its old address.
       const device = typeof msg.device === 'string' ? msg.device.slice(0, 64) : null;
       pushSubs = pushSubs.filter((x) => x.endpoint !== msg.sub.endpoint && !(device && x.device === device)).slice(-9);   // at most 10 phones
@@ -1590,6 +1590,8 @@ async function handle(ws, msg) {
     }
     case 'push-test': { const v = ws.visible; ws.visible = false; const any = [...clients].some((c) => c.visible); pushAll('Tether', any ? 'Test (the app is open on another device, so this may not show)' : 'Notifications work.', 'test'); ws.visible = v; return; }
     case 'vis': { ws.visible = !!msg.visible; return; }
+    // The phone app reports its own errors here, so problems on a phone show up in server.log.
+    case 'clientlog': { logLimited('phone:', String(msg.text || '').replace(/[\r\n]+/g, ' ').slice(0, 300)); return; }
     case 'run': return runCommand(ws, msg);
     case 'run-stop': { if (ws.run) { ws.runWhy = 'Stopped.'; ws.run.kill(); } return; }
     // Git for a project folder: see what changed, read a diff, commit everything, pull, push.
