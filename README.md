@@ -9,6 +9,10 @@
 
 It all runs on your computer: your files, chats and commands stay there, and the phone connects to it directly. (Claude's own requests go to Anthropic, as with any use of Claude Code.)
 
+<img src="docs/demo.gif" width="760" alt="Tether on a phone: Claude Code chat, files, terminal and system monitor">
+
+<sub>A 28-second tour with demo data. [Watch as MP4](docs/demo.mp4).</sub>
+
 <p>
   <img src="docs/screens/chat.png" width="190" alt="A chat with an approval card">
   <img src="docs/screens/menu.png" width="190" alt="The menu with chats and tools">
