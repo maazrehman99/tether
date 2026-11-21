@@ -272,7 +272,7 @@
       }
       case 'terminal': renderTerminal(m.sessions); break;
       case 'run-out': case 'run-end': termMsg(m); break;
-      case 'file': case 'sys': case 'lock-begin': case 'lock-state': case 'lock-reauth': case 'awake': { const h = fileWaits.get(m.rid); if (h) { fileWaits.delete(m.rid); h(m); } break; }
+      case 'file': case 'sys': case 'media': case 'lock-begin': case 'lock-state': case 'lock-reauth': case 'awake': { const h = fileWaits.get(m.rid); if (h) { fileWaits.delete(m.rid); h(m); } break; }
       case 'error': toastLine('Error: ' + m.msg); break;
     }
   }
@@ -1025,12 +1025,12 @@
   let vOpen = false;
   const curProject = () => (S.cur && S.chats.get(S.cur) ? S.chats.get(S.cur).project : S.project);
 
-  function askFile(req, op = 'file') {
+  function askFile(req, op = 'file', wait = 20000) {
     return new Promise((resolve) => {
       const r = rid();
       fileWaits.set(r, resolve);
       if (!wsSend({ op, rid: r, ...req })) { fileWaits.delete(r); resolve({ err: 'offline' }); }
-      setTimeout(() => { if (fileWaits.has(r)) { fileWaits.delete(r); resolve({ err: 'timeout' }); } }, 20000);
+      setTimeout(() => { if (fileWaits.has(r)) { fileWaits.delete(r); resolve({ err: 'timeout' }); } }, wait);
     });
   }
 
@@ -1044,6 +1044,7 @@
     if (!vOpen) return;
     vOpen = false; vStack = [];
     clearInterval(sysTimer); sysTimer = 0;
+    vBody.onscroll = null; closePdf();
     if (term && term.running) { wsSend({ op: 'run-stop' }); term.cur.end = 'Stopped (screen closed)'; term.cur.bad = true; termSave(); }
     term = null;
     viewer.classList.remove('show');
@@ -1112,6 +1113,7 @@
       return;
     }
     if (r.text != null && r.text.length < 300000) store.set(key, r);
+    if (r.kind) { openMedia(r, project, p, dl); return; }
     renderFile(r, false);
     dl();
   }
@@ -1125,6 +1127,8 @@
     if (r.image) { const img = el('img', 'v-img'); img.src = r.image; vBody.append(img); return; }
     const text = r.text || '';
     const isMd = /\.(md|mdx|markdown)$/i.test(r.path || '');
+    const sep = /\.csv$/i.test(r.path || '') ? ',' : /\.tsv$/i.test(r.path || '') ? '\t' : null;
+    if (sep && text) { renderTable(text, sep); vAct.hidden = false; vAct.textContent = 'Copy'; delete vAct.dataset.was; vAct.onclick = () => copyWith(vAct, text); return; }
     vAct.hidden = false;
     if (isMd) {
       let body = text, front = '';
@@ -1145,6 +1149,88 @@
       vAct.textContent = pre.classList.contains('wrap') ? 'No wrap' : 'Wrap';
       vAct.onclick = () => { const w = pre.classList.toggle('wrap'); store.set('wrap', w); vAct.textContent = w ? 'No wrap' : 'Wrap'; buzz(4); };
     }
+  }
+
+  // ---------- viewers: tables, PDF (and office files as PDF), video, audio ----------
+  function splitCsv(line, sep) {   // handles "quoted, fields" and "" inside quotes
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) { if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+      else if (c === '"') q = true; else if (c === sep) { out.push(cur); cur = ''; } else cur += c;
+    }
+    out.push(cur); return out;
+  }
+  function renderTable(text, sep) {
+    const rows = text.replace(/\r/g, '').split('\n').filter((l) => l.length).slice(0, 1001).map((l) => splitCsv(l, sep));
+    const wrap = el('div', 'v-table'); const t = el('table');
+    rows.forEach((r, i) => { const tr = el('tr'); for (const c of r) { const td = el(i ? 'td' : 'th'); td.textContent = c; tr.append(td); } t.append(tr); });
+    wrap.append(t); vBody.append(wrap);
+    if (rows.length > 1000) vBody.append(el('div', 'v-note', 'Showing the first 1,000 rows.'));
+  }
+  let pdfLib = null, pdfDoc = null, pdfTask = null, pdfZoom = 1;
+  // Free the open PDF (its worker and memory). Closing the viewer must never fail because of it.
+  function closePdf() { const t = pdfTask; pdfTask = null; pdfDoc = null; if (t) { try { t.destroy(); } catch {} } }
+  async function openMedia(r, project, p, dl) {
+    const top = () => { const s = vStack[vStack.length - 1]; return s && s.path === p; };
+    const label = { pdf: 'Opening…', office: r.office ? 'Turning it into a PDF on your computer…' : '', video: 'Loading video…', audio: 'Loading…' }[r.kind] || 'Opening…';
+    if (r.kind === 'office' && !r.office) { vBody.innerHTML = '<div class="v-msg">To view Word, Excel and PowerPoint files here, install LibreOffice on your computer. You can still download it.</div>'; return dl(); }
+    vBody.innerHTML = `<div class="v-msg">${esc(label)}</div>`;
+    const m = await askFile({ project, path: p }, 'media', 150000);
+    if (!top()) return;
+    if (m.err) { vBody.innerHTML = `<div class="v-msg">${esc(m.err === 'offline' ? 'No connection.' : m.err === 'timeout' ? 'This took too long.' : m.err)}</div>`; return dl(); }
+    vBody.innerHTML = '';
+    if (m.kind === 'video' || m.kind === 'audio') {
+      const v = el(m.kind, 'v-media'); v.controls = true; v.preload = 'metadata'; v.setAttribute('playsinline', ''); v.src = m.url;
+      v.onerror = () => { if (top()) vBody.prepend(el('div', 'v-note', 'This phone can\'t play this format. Download it instead.')); };
+      vBody.append(v); return dl();
+    }
+    await showPdf(m.url, p, dl);
+  }
+  async function showPdf(url, p, dl) {
+    const top = () => { const s = vStack[vStack.length - 1]; return s && s.path === p; };
+    try {
+      if (!pdfLib) { pdfLib = await import('/vendor/pdfjs/pdf.min.mjs'); pdfLib.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs'; }
+      closePdf();
+      const V = '/vendor/pdfjs/';
+      pdfTask = pdfLib.getDocument({ url, cMapUrl: V + 'cmaps/', cMapPacked: true, standardFontDataUrl: V + 'standard_fonts/', wasmUrl: V + 'wasm/', iccUrl: V + 'iccs/', isEvalSupported: false });
+      pdfDoc = await pdfTask.promise;
+    } catch (e) { if (top()) { vBody.innerHTML = '<div class="v-msg">Couldn\'t open this PDF.</div>'; dl(); } return; }
+    if (!top()) return;
+    const doc = pdfDoc, n = doc.numPages;
+    const first = await doc.getPage(1), base = first.getViewport({ scale: 1 });
+    const box = el('div', 'v-pdf'); vBody.append(box);
+    const pages = [];
+    for (let i = 1; i <= n; i++) { const d = el('div', 'v-page'); d.dataset.n = i; d.style.aspectRatio = base.width + ' / ' + base.height; box.append(d); pages.push(d); }
+    const shown = new Set();
+    async function paint(d) {
+      const i = +d.dataset.n, page = await doc.getPage(i);
+      const vp1 = page.getViewport({ scale: 1 });
+      d.style.aspectRatio = vp1.width + ' / ' + vp1.height;
+      const cssW = d.clientWidth || box.clientWidth, dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const scale = Math.min(cssW * dpr / vp1.width, 4096 / vp1.width);
+      const vp = page.getViewport({ scale });
+      const c = document.createElement('canvas'); c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      await page.render({ canvas: c, canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      if (doc !== pdfDoc) return;
+      d.replaceChildren(c); d.classList.add('done');
+    }
+    const io = new IntersectionObserver((es) => { for (const e of es) if (e.isIntersecting && !shown.has(e.target)) { shown.add(e.target); paint(e.target).catch(() => {}); } }, { root: vBody, rootMargin: '800px 0px' });
+    pages.forEach((d) => io.observe(d));
+    const where = () => { let cur = 1; const y = vBody.scrollTop + vBody.clientHeight / 3; for (const d of pages) { if (d.offsetTop <= y) cur = +d.dataset.n; else break; } vSub.textContent = `Page ${cur} of ${n}`; };
+    vBody.onscroll = where; where();
+    // Zoom: 1x fits the width; 1.5x and 2x let you scroll sideways. Pages are drawn again, sharp.
+    pdfZoom = 1;
+    vAct.hidden = false; vAct.textContent = 'Zoom 1×'; delete vAct.dataset.was;
+    vAct.onclick = () => {
+      pdfZoom = pdfZoom === 1 ? 1.5 : pdfZoom === 1.5 ? 2 : 1;
+      vAct.textContent = 'Zoom ' + pdfZoom + '×'; buzz(4);
+      const keep = vBody.scrollTop / Math.max(1, vBody.scrollHeight);
+      box.style.width = pdfZoom * 100 + '%';
+      shown.clear(); pages.forEach((d) => { d.classList.remove('done'); io.unobserve(d); io.observe(d); });
+      requestAnimationFrame(() => { vBody.scrollTop = keep * vBody.scrollHeight; });
+    };
+    dl();
   }
 
   async function openDir(p = '.', project = curProject(), isBack) {

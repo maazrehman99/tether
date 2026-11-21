@@ -86,6 +86,14 @@ else {
   catch { bad('Voice notes: this Python has no faster-whisper', `Run: ${py} -m pip install faster-whisper`); }
 }
 
+// Optional: Word, Excel and PowerPoint viewing through LibreOffice
+{
+  const want = config && config.office ? expand(config.office) : null;
+  let found = null;
+  for (const b of want ? [want] : ['soffice', 'libreoffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice']) { try { run(b, ['--version']); found = b; break; } catch {} }
+  found ? ok('Office files: LibreOffice found, Word/Excel/PowerPoint open as PDF') : skip('Office files: LibreOffice not found (optional)', 'Install LibreOffice to view Word, Excel and PowerPoint files on the phone');
+}
+
 // Is the server up right now? (information only)
 await new Promise((done) => {
   const req = http.get({ host: '127.0.0.1', port: PORT, path: '/', timeout: 2000 }, (res) => { res.resume(); ok(`Server is running on port ${PORT}`); done(); });

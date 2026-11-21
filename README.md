@@ -41,7 +41,7 @@ On a tablet or desktop the chat list stays open on the left:
 
 **Files between your phone and computer**
 - **Browse** the folders you choose: your projects, plus others like Downloads (or your whole home folder, with the fingerprint lock on).
-- **Read** text, code, Markdown and images right on the phone.
+- **Open almost anything** right on the phone: PDFs (with zoom), Word, Excel and PowerPoint files (turned into PDF on your computer by LibreOffice, if installed), videos and audio with seeking, CSV files as tables, plus text, code, Markdown and images.
 - **Save to the phone** any file from the computer, and **upload** photos and files from the phone into any of those folders.
 
 **Terminal**
@@ -196,6 +196,7 @@ Everything lives in `config.json`.
 | `voice.python` | Optional. The Python that has `faster-whisper` installed. Turns voice notes on |
 | `voice.model` | Optional. Whisper model size. Default `small` |
 | `voice.hints` | Optional. Words the speech recogniser should expect, like your project names |
+| `office` | Optional. Path to LibreOffice (`soffice`) if it isn't found on its own. Used to show Word, Excel and PowerPoint files |
 | `uploads` | Optional. Where files sent from the phone are saved. Default `~/Downloads/tether-uploads` |
 | `claudeBin` | Optional. Path to `claude` if it is not at `~/.local/bin/claude` or on your PATH |
 | `url` | Optional. The address the phone should use, if `npm run pair` can't find it |
@@ -333,6 +334,13 @@ systemctl --user enable --now tether
 | Windows computer | **Not yet tested.** Easiest is to run it inside WSL2, where everything works like Linux. Outside WSL, joining a tmux session is not available |
 
 If you try one of the untested ones, please open an issue and say what happened, good or bad.
+
+## Viewing documents
+
+- **PDF** opens inside the app, drawn by [PDF.js](https://mozilla.github.io/pdf.js/) (Mozilla, Apache 2.0, included in `public/vendor/pdfjs`). Pages load as you scroll; **Zoom** switches between 1×, 1.5× and 2×.
+- **Word, Excel, PowerPoint** (`.docx`, `.xlsx`, `.pptx` and the older and OpenDocument kinds) are turned into a PDF on your computer by [LibreOffice](https://www.libreoffice.org/), then shown the same way. Install LibreOffice to use this; without it these files can still be downloaded. The PDF is kept in `data/cache` until the file changes.
+- **Video and audio** play straight from your computer, and you can jump anywhere in them. Whether a format plays depends on the phone (MP4 and MP3 play everywhere).
+- Each viewer gets a private link that works for 30 minutes and opens only that one file.
 
 ## How it works
 

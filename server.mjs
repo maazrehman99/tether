@@ -904,6 +904,75 @@ function pcStop(chat) {
 
 // ---------- file viewer (read-only, only inside the project folders) ----------
 const HIDE = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.mypy_cache', '.pytest_cache', '.next', 'dist', 'build', '.cache']);
+// Files the phone shows with a viewer instead of as text.
+const KIND = {};
+for (const e of ['.pdf']) KIND[e] = 'pdf';
+for (const e of ['.doc', '.docx', '.odt', '.rtf', '.xls', '.xlsx', '.ods', '.ppt', '.pptx', '.odp']) KIND[e] = 'office';
+for (const e of ['.mp4', '.m4v', '.webm', '.mov', '.ogv']) KIND[e] = 'video';
+for (const e of ['.mp3', '.m4a', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac']) KIND[e] = 'audio';
+const MEDIA_TYPE = { '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.ogv': 'video/ogg',
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.flac': 'audio/flac' };
+
+// Short-lived links for the phone's PDF viewer and video/audio player. A <video> tag can't send the key
+// in a header, so the phone asks (over its signed-in connection) for a random link that opens one file
+// for 30 minutes.
+const mediaLinks = new Map();   // token -> { file, type, exp }
+setInterval(() => { for (const [k, v] of mediaLinks) if (v.exp < Date.now()) mediaLinks.delete(k); }, 60000).unref();
+function mediaLink(file, type) {
+  const t = crypto.randomBytes(24).toString('base64url');
+  mediaLinks.set(t, { file, type, exp: Date.now() + 30 * 60000 });
+  return '/api/media?t=' + t;
+}
+// Streams the file, with byte ranges so videos can seek and PDFs can load page by page.
+function serveMedia(req, res, url) {
+  const m = mediaLinks.get(url.searchParams.get('t') || '');
+  const head = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes', 'Content-Disposition': 'inline' };
+  if (!m || m.exp < Date.now()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('This link has expired. Open the file again.'); }
+  let st; try { st = fs.statSync(m.file); } catch { res.writeHead(404); return res.end(); }
+  if (!st.isFile()) { res.writeHead(404); return res.end(); }
+  const r = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+  if (r && (r[1] || r[2])) {
+    let start = r[1] ? Number(r[1]) : Math.max(0, st.size - Number(r[2]));
+    let end = r[1] && r[2] ? Math.min(Number(r[2]), st.size - 1) : st.size - 1;
+    if (start >= st.size || start > end) { res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end(); }
+    res.writeHead(206, { ...head, 'Content-Type': m.type, 'Content-Length': end - start + 1, 'Content-Range': `bytes ${start}-${end}/${st.size}` });
+    return fs.createReadStream(m.file, { start, end }).pipe(res);
+  }
+  res.writeHead(200, { ...head, 'Content-Type': m.type, 'Content-Length': st.size });
+  return fs.createReadStream(m.file).pipe(res);
+}
+
+// Word, Excel and PowerPoint files are turned into a PDF by LibreOffice on this computer (if it is
+// installed), then shown with the same viewer. Results are kept in data/cache until the file changes.
+let officeFound;
+function officeBin() {
+  if (officeFound !== undefined) return officeFound;
+  const want = CONFIG.office ? expand(CONFIG.office) : null;
+  for (const b of want ? [want] : ['soffice', 'libreoffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice']) {
+    try { execFileSync(b, ['--version'], { stdio: 'ignore', timeout: 20000 }); return (officeFound = b); } catch {}
+  }
+  return (officeFound = null);
+}
+let officeQueue = Promise.resolve();
+function officeToPdf(file, st) {
+  const key = crypto.createHash('sha256').update(file + ':' + st.size + ':' + st.mtimeMs).digest('hex').slice(0, 24);
+  const outDir = path.join(DATA, 'cache', key);
+  const out = path.join(outDir, path.basename(file, path.extname(file)) + '.pdf');
+  if (fs.existsSync(out)) return Promise.resolve(out);
+  const bin = officeBin();
+  if (!bin) return Promise.reject(new Error('LibreOffice is not installed on the computer, so this file can only be downloaded.'));
+  if (st.size > 50 * 1024 * 1024) return Promise.reject(new Error('This file is too big to show (over 50 MB). Download it instead.'));
+  // One conversion at a time, with its own LibreOffice profile so it never touches the person's own LibreOffice.
+  const job = officeQueue.then(() => new Promise((resolve, reject) => {
+    fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
+    const profile = 'file://' + path.join(DATA, 'office-profile').split(path.sep).join('/');
+    execFile(bin, ['--headless', '--norestore', '--nolockcheck', '-env:UserInstallation=' + profile, '--convert-to', 'pdf', '--outdir', outDir, file],
+      { timeout: 120000, stdio: 'ignore' }, (e) => (fs.existsSync(out) ? resolve(out) : reject(new Error(e && e.killed ? 'Turning it into a PDF took too long.' : 'LibreOffice could not open this file.'))));
+  }));
+  officeQueue = job.catch(() => {});
+  return job;
+}
+
 const SECRET = /(^|\/)(\.env[^/]*|.*\.(pem|key|p12|pfx|ppk|kdbx|jks|keystore)|id_(rsa|ed25519|ecdsa|dsa)[^/]*|credentials[^/]*|\.netrc|\.git-credentials|\.npmrc|\.pypirc|\.pgpass|\.htpasswd|token|.*\.kube\/config)$/i;
 const IMG = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
 
@@ -940,6 +1009,8 @@ function readFileFor(project, p) {
   if (!st.isFile()) return { err: 'This is not a regular file.' };
   const ext = path.extname(sp.real).toLowerCase();
   const base = { path: sp.real.replace(os.homedir(), '~'), rel: sp.rel, size: st.size, mtime: st.mtimeMs };
+  const kind = KIND[ext];
+  if (kind) return { ...base, kind, office: kind === 'office' ? !!officeBin() : undefined };
   if (IMG[ext]) {
     if (st.size > 4 * 1024 * 1024) return { ...base, err: 'Image is too big to send (over 4 MB).' };
     return { ...base, image: `data:${IMG[ext]};base64,` + fs.readFileSync(sp.real).toString('base64') };
@@ -1407,6 +1478,20 @@ async function handle(ws, msg) {
     }
     case 'run': return runCommand(ws, msg);
     case 'run-stop': { if (ws.run) { ws.runWhy = 'Stopped.'; ws.run.kill(); } return; }
+    // Open a PDF, an office file (as PDF), a video or a song in the phone's viewer.
+    case 'media': {
+      const project = has(ROOTS, msg.project) ? msg.project : DEFAULT_PROJECT;
+      const reply = (r) => send(ws, { op: 'media', rid: msg.rid, ...r });
+      const sp = safePath(project, msg.path);
+      if (!sp || sp.err) return reply({ err: sp ? sp.err : 'Unknown project' });
+      let st; try { st = fs.statSync(sp.real); } catch { return reply({ err: 'File not found' }); }
+      if (!st.isFile()) return reply({ err: 'This is not a regular file.' });
+      const ext = path.extname(sp.real).toLowerCase(), kind = KIND[ext];
+      if (!kind) return reply({ err: 'This kind of file has no viewer yet.' });
+      if (kind !== 'office') return reply({ kind, url: mediaLink(sp.real, MEDIA_TYPE[ext]) });
+      try { const pdf = await officeToPdf(sp.real, st); return reply({ kind: 'pdf', converted: true, url: mediaLink(pdf, 'application/pdf') }); }
+      catch (e) { return reply({ err: e.message }); }
+    }
     case 'sys': {
       let r; try { r = await systemInfo(); } catch (e) { r = { err: e.message }; }
       return send(ws, { op: 'sys', rid: msg.rid, ...r });
@@ -1419,7 +1504,7 @@ async function handle(ws, msg) {
 }
 
 // ---------- static files (precompressed, cached on the phone) ----------
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/manifest+json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/manifest+json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8' };
 const assets = new Map();
 function loadAssets() {
   assets.clear();
@@ -1433,7 +1518,8 @@ function loadAssets() {
       const text = /^(text|application\/(manifest|json))|svg/.test(type);
       assets.set(rel, {
         type, body,
-        br: text ? zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }) : null,
+        // Big files (the PDF viewer) get lighter compression, so starting the server stays quick.
+        br: text ? zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: body.length > 200000 ? 6 : 11 } }) : null,
         gz: text ? zlib.gzipSync(body, { level: 9 }) : null,
         etag: '"' + crypto.createHash('sha1').update(body).digest('base64url').slice(0, 16) + '"',
       });
@@ -1609,12 +1695,13 @@ function cspSocket(req) {
 }
 function serve(req, res) {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname === '/api/media' && req.method === 'GET') return serveMedia(req, res, url);
   if (url.pathname.startsWith('/api/')) return api(req, res, url);
   let p = url.pathname === '/' ? '/index.html' : url.pathname;
   const a = assets.get(p);
   const sec = {
     'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': `default-src 'self'; connect-src 'self'${cspSocket(req)}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    'Content-Security-Policy': `default-src 'self'; connect-src 'self'${cspSocket(req)}; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
   };
   if (!a) { res.writeHead(404, sec); return res.end('Not found'); }
   if (req.headers['if-none-match'] === a.etag) { res.writeHead(304, { ...sec, ETag: a.etag }); return res.end(); }
