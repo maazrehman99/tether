@@ -1,7 +1,7 @@
 {
   "name": "tether",
   "version": "0.1.0",
-  "description": "Self-hosted phone client for Claude Code running on your own computer",
+  "description": "Your computer in your pocket: Claude Code, files both ways, a terminal and a system monitor, self-hosted over Tailscale",
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",

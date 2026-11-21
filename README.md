@@ -1,8 +1,13 @@
 # Tether
 
-A self-hosted phone app for **Claude Code running on your own computer**.
+**Your computer, in your pocket.** A self-hosted phone app that connects to your own computer from anywhere, over your private [Tailscale](https://tailscale.com) network.
 
-You open it on your phone, type or speak, and the Claude Code on your computer does the work in your real project folders. Your phone talks to your computer directly over your own [Tailscale](https://tailscale.com) network. Chats are stored on your computer.
+- **Claude Code** in any of your project folders, with approvals on the phone
+- **Files** moving both ways: browse your computer, save files to the phone, upload from the phone
+- **A terminal** made for a phone screen: `cd` memory, history, one-tap shortcuts and `sudo`
+- **System monitor**: live CPU, memory, disk, battery and the busiest programs
+
+It all runs on your computer: your files, chats and commands stay there, and the phone connects to it directly. (Claude's own requests go to Anthropic, as with any use of Claude Code.)
 
 <p>
   <img src="docs/screens/chat.png" width="190" alt="A chat with an approval card">
@@ -23,31 +28,48 @@ On a tablet or desktop the chat list stays open on the left:
 
 ## What it does
 
+**Claude Code**
 - **Chat with Claude Code from your phone.** It runs the real Claude Code on your computer, with your own login, in the project folder you choose.
-- **From anywhere.** At home or in another country, the phone only needs internet. Tailscale connects it to your computer.
-- **Always ready.** The server starts with your computer. You don't open Claude Code on the computer first: start a new chat from the phone, in any of your project folders.
-- **Keep the computer awake.** A switch in Settings stops your computer from sleeping while it is plugged in, even with a laptop lid closed, so the phone can still reach it.
 - **Approve or deny from the phone.** When Claude wants to run a command or edit a file, a card appears with Allow and Deny.
-- **Notifications.** The phone tells you when Claude needs your approval or has finished, while the app is open in the background. (No push yet when the app is fully closed.)
-- **Keeps working on bad signal.** Claude keeps working on the computer when the phone drops. When the phone comes back, it catches up from where it stopped. Messages you type with no signal wait and send themselves later.
-- **Files.** Browse the folders you choose on your computer: your project folders, plus any others you add, like Downloads. Read files, save them to the phone, and upload files from the phone into any of those folders.
-- **This computer.** See CPU, memory, disk, battery and the busiest programs on your computer, live. It only shows them; it can't stop or change anything.
-- **Fingerprint lock (optional).** Turn it on and each phone must pass your fingerprint, face or screen lock once; the computer then remembers that phone for 30 days. Your computer checks the proof itself, so a leaked link or QR code alone can't get in.
-- **Terminal (optional, off by default).** Run quick commands on your computer and see what they print. It remembers the folder you `cd` into, keeps your history, offers one-tap `cd` shortcuts to your project folders, and supports `sudo`. It only works while the fingerprint lock is on.
+- **Continue a chat that is open on the computer (optional).** If Claude Code runs in a tmux session, the phone and the computer show the same conversation.
 - **Voice notes (optional).** Speak instead of typing. The speech is turned into text on your own computer.
-- **Join a Claude that is already open on the computer (optional).** If Claude Code runs in a tmux session, the phone and the computer show the same conversation.
-- **Installs like an app** on Android and iPhone, with light and dark themes, and a tablet layout.
-- **Yours to change.** The app is plain HTML, CSS and JavaScript with no build step. Change the colours, the layout or the buttons until it feels right for you. See [Make it yours](#make-it-yours).
+- **Notifications.** The phone tells you when Claude needs your approval or has finished, while the app is open in the background. (No push yet when the app is fully closed.)
+
+**Files between your phone and computer**
+- **Browse** the folders you choose: your projects, plus others like Downloads (or your whole home folder, with the fingerprint lock on).
+- **Read** text, code, Markdown and images right on the phone.
+- **Save to the phone** any file from the computer, and **upload** photos and files from the phone into any of those folders.
+
+**Terminal**
+- **Run commands on your computer** and see what they print, in a screen built for a phone.
+- It **remembers the folder** you `cd` into, **keeps your history**, offers **one-tap shortcuts** to your project folders and recent commands, and **supports `sudo`**.
+- Off by default, and it only works while the fingerprint lock is on. See [Terminal](#terminal-optional).
+
+**System monitor**
+- **Live CPU** (with a graph), **memory, disk, battery and temperature**, plus the **busiest programs** right now, and what Claude Code is doing.
+- It only shows them; it can't stop or change anything.
+
+**Always reachable**
+- **From anywhere.** At home or in another country, the phone only needs internet. Tailscale connects it to your computer.
+- **Always ready.** The server starts with your computer. Nothing needs to be open on the computer first.
+- **Keep the computer awake.** A switch stops your computer from sleeping while it is plugged in, even with a laptop lid closed.
+- **Keeps working on bad signal.** Claude keeps working when the phone drops; the phone catches up when it comes back. Messages typed with no signal send themselves later.
+
+**Yours**
+- **Fingerprint lock (optional).** Each phone passes your fingerprint, face or screen lock once; the computer then remembers that phone for 30 days. Your computer checks the proof itself, so a leaked link or QR code alone can't get in.
+- **Installs like an app** on Android and iPhone, with light and dark themes, an optional terminal look, and a tablet layout.
+- **Yours to change.** Plain HTML, CSS and JavaScript with no build step. Change the colours, the layout or the buttons until it feels right. See [Make it yours](#make-it-yours).
 - **Light and fast.** No framework. The whole app is about 33 KB compressed, and it opens even with no signal.
 
-## Should you use this or Remote Control?
+## How is this different from Remote Control?
 
-Claude Code has an official feature for this: [Remote Control](https://code.claude.com/docs/en/remote-control). **For most people it is the better choice.** It needs no server and no Tailscale, and it works in the official Claude app.
+Claude Code has an official way to reach a Claude Code session from your phone: [Remote Control](https://code.claude.com/docs/en/remote-control). If all you want is to chat with Claude from the Claude app, it is the easier choice: no server and no Tailscale.
 
-Use Tether if the differences below matter to you.
+Tether is a different kind of tool: a companion for your whole computer. Claude Code is one part of it, next to files, a terminal and a system monitor.
 
 | | Remote Control (official) | Tether |
 |---|---|---|
+| What you get | A Claude Code chat | Claude Code, plus files both ways, a terminal and a system monitor |
 | Setup | Run `claude --remote-control`, open the Claude app | Run a small server, set up Tailscale, pair the phone |
 | Where the chat is stored | Its docs say the transcript is stored on Anthropic servers while connected | On your computer only |
 | How the phone reaches the computer | Through Anthropic's service | Directly, over your own Tailscale network |
